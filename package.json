@@ -1,0 +1,11 @@
+{
+  "name": "nestjs-telemetry",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "lint": "npm run lint --workspaces"
+  },
+  "engines": { "node": ">=18.0.0" }
+}
