@@ -3,3 +3,6 @@ dist/
 *.telemetry.db
 .env
 coverage/
+*.db-shm
+*.db-wal
+.test-module.db
