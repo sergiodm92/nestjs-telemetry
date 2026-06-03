@@ -56,6 +56,20 @@ describe('TelemetryModelSubscriber', () => {
     expect(entry.content.action).toBe('DELETED');
   });
 
+  it('unwraps mixed-id map when entity is not loaded (cascade remove)', async () => {
+    const storage = createMockStorage();
+    const subscriber = new TelemetryModelSubscriber(storage as any);
+
+    await subscriber.afterRemove({
+      metadata: { name: 'User', tableName: 'users' },
+      entityId: { id: 3 },
+    } as any);
+
+    const entry = storage.store.mock.calls[0][0];
+    expect(entry.content.action).toBe('DELETED');
+    expect(entry.content.entityId).toBe(3);
+  });
+
   it('skips telemetry own entities', async () => {
     const storage = createMockStorage();
     const subscriber = new TelemetryModelSubscriber(storage as any);

@@ -1,14 +1,17 @@
 import { v4 as uuidv4 } from 'uuid';
+import { AfterQueryEvent, EntitySubscriberInterface } from 'typeorm';
 import {
   TelemetryStorage,
   TelemetryEntryType,
   TelemetryContext,
 } from '@nestjs-telemetry/core';
 
-export class TelemetryQuerySubscriber {
+export class TelemetryQuerySubscriber
+  implements EntitySubscriberInterface<any>
+{
   constructor(private readonly storage: TelemetryStorage) {}
 
-  afterQuery(event: any): void {
+  afterQuery(event: AfterQueryEvent<any>): void {
     if (!this.storage.isEnabled()) return;
 
     const sql: string = event.query || '';
