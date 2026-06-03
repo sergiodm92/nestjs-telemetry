@@ -10,6 +10,10 @@ export { TelemetryContext, TelemetryStore } from './context/telemetry-context';
 export { TelemetryUserProvider, TelemetryUserInfo, DefaultTelemetryUserProvider } from './context/telemetry-user.provider';
 export { TelemetryRequestInterceptor } from './watchers/request.interceptor';
 export { TelemetryExceptionFilter } from './watchers/exception.filter';
+export {
+  TelemetryExceptionInterceptor,
+  recordException,
+} from './watchers/exception.interceptor';
 export { TelemetryLogWatcher } from './watchers/log.watcher';
 export { TelemetryScheduleWatcher } from './watchers/schedule.watcher';
 export { TelemetryCacheInterceptor } from './watchers/cache.interceptor';

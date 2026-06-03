@@ -5,11 +5,12 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
-    "dist",
-    "src/dashboard"
+    "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && npm run copy:dashboard",
+    "copy:dashboard": "node -e \"const fs=require('fs');fs.mkdirSync('dist/dashboard',{recursive:true});fs.copyFileSync('src/dashboard/index.html','dist/dashboard/index.html')\"",
+    "prepublishOnly": "npm run build",
     "test": "jest --config jest.config.js",
     "lint": "tsc --noEmit"
   },
@@ -33,8 +34,8 @@
     "typescript": "^5.3.0"
   },
   "peerDependencies": {
-    "@nestjs/common": "^10.0.0",
-    "@nestjs/core": "^10.0.0",
+    "@nestjs/common": "^10.0.0 || ^11.0.0",
+    "@nestjs/core": "^10.0.0 || ^11.0.0",
     "reflect-metadata": "^0.1.13 || ^0.2.0",
     "rxjs": "^7.0.0"
   },
