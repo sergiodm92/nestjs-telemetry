@@ -7,6 +7,7 @@
   "files": ["dist"],
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build",
     "test": "jest --config jest.config.js",
     "lint": "tsc --noEmit"
   },
@@ -28,8 +29,8 @@
   },
   "peerDependencies": {
     "@nestjs-telemetry/core": "^0.1.0",
-    "@nestjs/common": "^10.0.0",
-    "@nestjs/core": "^10.0.0",
-    "@prisma/client": "^5.0.0"
+    "@nestjs/common": "^10.0.0 || ^11.0.0",
+    "@nestjs/core": "^10.0.0 || ^11.0.0",
+    "@prisma/client": "^5.0.0 || ^6.0.0"
   }
 }
