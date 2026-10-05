@@ -86,6 +86,31 @@ describe('TelemetryRequestInterceptor', () => {
     expect(entries).toHaveLength(0);
   });
 
+  it('records a global-prefix dashboard request when constructed with the bare basePath (documents the mismatch)', async () => {
+    // Same interceptor as above, built with just '/telemetry'. A consumer using
+    // app.setGlobalPrefix('api/v1') has real requests land on '/api/v1/telemetry/...', which
+    // does not start with '/telemetry' — so self-exclusion fails to recognize its own traffic.
+    const ctx = mockExecutionContext({ path: '/api/v1/telemetry/api/stats' });
+    await lastValueFrom(interceptor.intercept(ctx, mockCallHandler()));
+
+    const entries = await storage.getByType(TelemetryEntryType.REQUEST, {}, 0, 10);
+    expect(entries).toHaveLength(1);
+  });
+
+  it('honors externalBasePath for self-exclusion under a global prefix', async () => {
+    const prefixedInterceptor = new TelemetryRequestInterceptor(
+      storage,
+      new DefaultTelemetryUserProvider(),
+      ['/health'],
+      '/api/v1/telemetry',
+    );
+    const ctx = mockExecutionContext({ path: '/api/v1/telemetry/api/stats' });
+    await lastValueFrom(prefixedInterceptor.intercept(ctx, mockCallHandler()));
+
+    const entries = await storage.getByType(TelemetryEntryType.REQUEST, {}, 0, 10);
+    expect(entries).toHaveLength(0);
+  });
+
   it('truncates large request bodies', async () => {
     const largeBody = { data: 'x'.repeat(20000) };
     const ctx = mockExecutionContext({ body: largeBody });

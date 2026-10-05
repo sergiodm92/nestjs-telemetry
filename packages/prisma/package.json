@@ -28,7 +28,7 @@
     "rxjs": "^7.8.0"
   },
   "peerDependencies": {
-    "@nestjs-telemetry/core": "^0.1.0",
+    "@nestjs-telemetry/core": "^0.1.0 || ^0.2.0",
     "@nestjs/common": "^10.0.0 || ^11.0.0",
     "@nestjs/core": "^10.0.0 || ^11.0.0",
     "@prisma/client": "^5.0.0 || ^6.0.0"

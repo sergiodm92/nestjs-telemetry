@@ -33,7 +33,11 @@ import { TelemetryMailWatcher } from './watchers/mail.watcher';
 import { TelemetrySecurityGuard } from './watchers/security.guard';
 import { TelemetryPrunerService } from './pruner/telemetry-pruner.service';
 
-type ResolvedOptions = Required<TelemetryModuleOptions>;
+// `externalBasePath` is intentionally excluded from the `Required<...>` part: it has no
+// hardcoded default in DEFAULT_OPTIONS (see telemetry.options.ts), so it must stay optional
+// here too. Consumers resolve it as `opts.externalBasePath ?? opts.basePath` at the point of use.
+type ResolvedOptions = Required<Omit<TelemetryModuleOptions, 'externalBasePath'>> &
+  Pick<TelemetryModuleOptions, 'externalBasePath'>;
 
 /** No-op binding used when a watcher toggle is disabled. */
 const PASS_THROUGH_INTERCEPTOR: NestInterceptor = {
@@ -125,7 +129,7 @@ function buildWatcherProviders(): Provider[] {
               storage,
               userProvider,
               opts.ignoredPrefixes,
-              opts.basePath,
+              opts.externalBasePath ?? opts.basePath,
             )
           : PASS_THROUGH_INTERCEPTOR,
       inject: [TELEMETRY_OPTIONS, TELEMETRY_STORAGE, TELEMETRY_USER_PROVIDER],
@@ -156,7 +160,10 @@ function buildWatcherProviders(): Provider[] {
       provide: APP_GUARD,
       useFactory: (opts: ResolvedOptions): CanActivate =>
         opts.accessToken
-          ? new TelemetrySecurityGuard(opts.basePath, opts.accessToken)
+          ? new TelemetrySecurityGuard(
+              opts.externalBasePath ?? opts.basePath,
+              opts.accessToken,
+            )
           : PASS_THROUGH_GUARD,
       inject: [TELEMETRY_OPTIONS],
     },

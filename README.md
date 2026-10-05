@@ -49,6 +49,7 @@ TelemetryModule.forRoot({
   storage: 'memory',              // 'memory' | 'sqlite'
   sqlitePath: '.telemetry.db',    // SQLite file path
   basePath: '/telemetry',         // Dashboard and API base URL
+  externalBasePath: undefined,    // Real request path, if different from basePath (see below)
   maxEntries: 1000,               // Max entries per type (in-memory)
   pruneHours: 24,                 // Auto-delete entries older than this
   pruneIntervalMs: 3600000,       // How often to run pruning (1h)
@@ -69,6 +70,13 @@ TelemetryModule.forRoot({
   },
 })
 ```
+
+`externalBasePath` matters if your app calls `app.setGlobalPrefix(...)`: `basePath` is only used
+to register the dashboard's route (before the prefix is applied), so the access-token guard and
+the request watcher's self-exclusion keep comparing against the un-prefixed path unless you set
+`externalBasePath` to the real, prefixed path (e.g. `basePath: '/telemetry'`,
+`externalBasePath: '/api/v1/telemetry'`). Without it, the access token is silently never checked
+for a prefixed app.
 
 ### Async Configuration
 
