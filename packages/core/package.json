@@ -2,6 +2,15 @@
   "name": "@nestjs-telemetry/core",
   "version": "0.1.0",
   "description": "Zero-config real-time debugging dashboard for NestJS",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sergiodm92/nestjs-telemetry.git",
+    "directory": "packages/core"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -16,7 +25,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.0.0",
-    "uuid": "^10.0.0"
+    "uuid": "^11.1.1"
   },
   "devDependencies": {
     "@nestjs/common": "^10.0.0",
