@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NestInterceptor,
   ExecutionContext,
   CallHandler,
@@ -15,8 +16,20 @@ import { TelemetryUserProvider } from '../context/telemetry-user.provider';
 const MAX_BODY_LENGTH = 10000;
 const SENSITIVE_HEADERS = ['authorization', 'cookie', 'set-cookie'];
 
+/**
+ * Records one REQUEST entry per HTTP request, when its response ends.
+ *
+ * Not when the handler settles: Nest sets the success status (200/201) before the handler runs,
+ * and the exception filter that writes the real 4xx/5xx status only runs after this interceptor's
+ * observable has already errored. The status code is final only once the response itself ends.
+ *
+ * Requests that fail before reaching an interceptor (rejected by a guard, or matching no route)
+ * are never seen here, so they are not recorded.
+ */
 @Injectable()
 export class TelemetryRequestInterceptor implements NestInterceptor {
+  private readonly logger = new Logger(TelemetryRequestInterceptor.name);
+
   constructor(
     private readonly storage: TelemetryStorage,
     private readonly userProvider: TelemetryUserProvider,
@@ -45,19 +58,51 @@ export class TelemetryRequestInterceptor implements NestInterceptor {
     };
 
     return new Observable((subscriber) => {
+      let recorded = false;
+      const recordOnce = (): void => {
+        if (recorded) return;
+        recorded = true;
+        this.recordSafely(req, res, batchId, start, userInfo);
+      };
+
+      // 'finish' is the normal end of a response; 'close' covers a connection that ended before
+      // it finished. Whichever fires first records and the other is ignored. Fastify keeps the
+      // Node response in `reply.raw`.
+      const nodeRes = res?.raw ?? res;
+      const watchesResponse = typeof nodeRes?.once === 'function';
+      if (watchesResponse) {
+        nodeRes.once('finish', recordOnce);
+        nodeRes.once('close', recordOnce);
+      }
+
       TelemetryContext.run(store, () => {
-        next.handle().pipe(
-          tap({
-            next: () => {
-              this.record(req, res, batchId, start, userInfo);
-            },
-            error: () => {
-              this.record(req, res, batchId, start, userInfo);
-            },
-          }),
+        const handled = next.handle();
+        // A response object that cannot be watched is recorded when the handler settles instead:
+        // the status may then still be the pre-set one, but the request is not lost.
+        (watchesResponse
+          ? handled
+          : handled.pipe(tap({ next: recordOnce, error: recordOnce, complete: recordOnce }))
         ).subscribe(subscriber);
       });
     });
+  }
+
+  private recordSafely(
+    req: any,
+    res: any,
+    batchId: string,
+    start: number,
+    userInfo: any,
+  ): void {
+    try {
+      this.record(req, res, batchId, start, userInfo);
+    } catch (err) {
+      // This runs from a response event, where a throw would be an uncaught exception. Telemetry
+      // only observes: it must never be able to take down the app it observes.
+      this.logger.warn(
+        `Could not record request: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   private record(

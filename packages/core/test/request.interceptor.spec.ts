@@ -1,8 +1,11 @@
+import { EventEmitter } from 'events';
+import { Logger } from '@nestjs/common';
 import { TelemetryRequestInterceptor } from '../src/watchers/request.interceptor';
 import { InMemoryTelemetryStorage } from '../src/storage/in-memory.storage';
 import { DefaultTelemetryUserProvider } from '../src/context/telemetry-user.provider';
+import { TelemetryContext } from '../src/context/telemetry-context';
 import { TelemetryEntryType } from '../src/model/telemetry-entry-type';
-import { of } from 'rxjs';
+import { Observable, from, of, throwError } from 'rxjs';
 import { lastValueFrom } from 'rxjs';
 
 function mockExecutionContext(reqOverrides: any = {}) {
@@ -127,5 +130,202 @@ describe('TelemetryRequestInterceptor', () => {
 
     const entries = await storage.getByType(TelemetryEntryType.REQUEST, {}, 0, 10);
     expect(entries).toHaveLength(0);
+  });
+});
+
+// A real response announces when it has been sent; the plain-object responses above cannot, so
+// they exercise the fallback. These tests drive the same events Node emits.
+describe('TelemetryRequestInterceptor: recording when the response ends', () => {
+  let storage: InMemoryTelemetryStorage;
+  let interceptor: TelemetryRequestInterceptor;
+
+  beforeEach(() => {
+    storage = new InMemoryTelemetryStorage(100);
+    interceptor = new TelemetryRequestInterceptor(
+      storage,
+      new DefaultTelemetryUserProvider(),
+      ['/health'],
+      '/telemetry',
+    );
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  function mockResponse(statusCode = 201) {
+    return Object.assign(new EventEmitter(), { statusCode });
+  }
+
+  function contextFor(res: any, reqOverrides: any = {}) {
+    const req = {
+      method: 'POST',
+      originalUrl: '/orders',
+      path: '/orders',
+      headers: {},
+      ip: '127.0.0.1',
+      body: {},
+      ...reqOverrides,
+    };
+    return {
+      switchToHttp: () => ({ getRequest: () => req, getResponse: () => res }),
+      getHandler: () => ({}),
+      getClass: () => ({}),
+    } as any;
+  }
+
+  const stored = () => storage.getByType(TelemetryEntryType.REQUEST, {}, 0, 10);
+  const okHandler = { handle: () => of({ ok: true }) };
+
+  it('records nothing until the response has ended', async () => {
+    const res = mockResponse();
+    await lastValueFrom(interceptor.intercept(contextFor(res), okHandler));
+    expect(await stored()).toHaveLength(0);
+
+    res.emit('finish');
+    expect(await stored()).toHaveLength(1);
+  });
+
+  it('stores the status the response ended with, not the success status set before the handler ran', async () => {
+    // Nest pre-sets 201 for a POST; the host's exception filter writes the real status afterwards.
+    const res = mockResponse(201);
+    const failing = { handle: () => throwError(() => new Error('invalid')) };
+    await expect(lastValueFrom(interceptor.intercept(contextFor(res), failing))).rejects.toThrow('invalid');
+
+    res.statusCode = 400;
+    res.emit('finish');
+
+    const [entry] = await stored();
+    expect(entry.content.status).toBe(400);
+  });
+
+  it('stores a changed status for a request that succeeded too (a redirect written after the handler)', async () => {
+    const res = mockResponse(200);
+    await lastValueFrom(interceptor.intercept(contextFor(res, { method: 'GET' }), okHandler));
+
+    res.statusCode = 302;
+    res.emit('finish');
+
+    const [entry] = await stored();
+    expect(entry.content.status).toBe(302);
+    expect(entry.content.method).toBe('GET');
+  });
+
+  it('records exactly once when the response finishes and then closes', async () => {
+    const res = mockResponse();
+    await lastValueFrom(interceptor.intercept(contextFor(res), okHandler));
+    expect(await stored()).toHaveLength(0);
+
+    res.emit('finish');
+    res.emit('close');
+
+    expect(await stored()).toHaveLength(1);
+  });
+
+  it('records on close when the connection ended before the response finished', async () => {
+    const res = mockResponse();
+    await lastValueFrom(interceptor.intercept(contextFor(res), okHandler));
+    expect(await stored()).toHaveLength(0);
+
+    res.emit('close');
+
+    expect(await stored()).toHaveLength(1);
+  });
+
+  it('records one entry per request when the handler emits several values', async () => {
+    const res = mockResponse(200);
+    const emitsThrice = { handle: () => from([1, 2, 3]) };
+    await lastValueFrom(interceptor.intercept(contextFor(res), emitsThrice));
+
+    res.emit('finish');
+
+    expect(await stored()).toHaveLength(1);
+  });
+
+  it('measures the duration up to the end of the response', async () => {
+    const now = jest.spyOn(Date, 'now');
+    const res = mockResponse(500);
+
+    now.mockReturnValue(1_000);
+    const observable = interceptor.intercept(contextFor(res), okHandler);
+    now.mockReturnValue(1_010); // the handler is done...
+    await lastValueFrom(observable);
+    now.mockReturnValue(1_250); // ...but the exception filter was slow to write the response
+    res.emit('finish');
+
+    const [entry] = await stored();
+    expect(entry.content.duration).toBe(250);
+  });
+
+  it('keeps the batch id of the request on its entry', async () => {
+    const res = mockResponse(200);
+    let seenWhileHandling: string | undefined;
+    const handler = {
+      handle: () =>
+        new Observable((subscriber) => {
+          seenWhileHandling = TelemetryContext.getBatchId();
+          subscriber.next(1);
+          subscriber.complete();
+        }),
+    };
+    await lastValueFrom(interceptor.intercept(contextFor(res), handler));
+    res.emit('finish');
+
+    const [entry] = await stored();
+    expect(seenWhileHandling).toBeDefined();
+    expect(entry.batchId).toBe(seenWhileHandling);
+  });
+
+  it('leaves its own base path and ignored prefixes alone: nothing is watched or recorded', async () => {
+    for (const path of ['/telemetry', '/telemetry/api/stats', '/health']) {
+      const res = mockResponse(200);
+      await lastValueFrom(interceptor.intercept(contextFor(res, { path }), okHandler));
+      expect(res.listenerCount('finish')).toBe(0);
+      expect(res.listenerCount('close')).toBe(0);
+      res.emit('finish');
+    }
+    expect(await stored()).toHaveLength(0);
+  });
+
+  it('does not record a request whose recording was switched off before it ended', async () => {
+    const res = mockResponse(200);
+    await lastValueFrom(interceptor.intercept(contextFor(res), okHandler));
+
+    storage.setEnabled(false);
+    res.emit('finish');
+
+    expect(await stored()).toHaveLength(0);
+  });
+
+  it('never throws out of the response event when recording fails', () => {
+    const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+    jest.spyOn(storage, 'store').mockImplementation(() => {
+      throw new Error('storage down');
+    });
+    const res = mockResponse(200);
+
+    return lastValueFrom(interceptor.intercept(contextFor(res), okHandler)).then(() => {
+      // A throw from a 'finish' listener would be an uncaught exception that kills the host app.
+      expect(() => res.emit('finish')).not.toThrow();
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('storage down'));
+    });
+  });
+
+  it('watches the Node response that a Fastify-style reply keeps in .raw', async () => {
+    const raw = mockResponse(404);
+    const reply = { statusCode: 404, raw };
+    await lastValueFrom(interceptor.intercept(contextFor(reply, { method: 'GET' }), okHandler));
+    expect(await stored()).toHaveLength(0);
+
+    raw.emit('finish');
+
+    const [entry] = await stored();
+    expect(entry.content.status).toBe(404);
+  });
+
+  it('falls back to recording when the handler settles if the response cannot be watched, still once', async () => {
+    const unwatchable = { statusCode: 200 };
+    const emitsTwice = { handle: () => from([1, 2]) };
+    await lastValueFrom(interceptor.intercept(contextFor(unwatchable), emitsTwice));
+
+    expect(await stored()).toHaveLength(1);
   });
 });

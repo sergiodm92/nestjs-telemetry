@@ -117,6 +117,31 @@ export class SqliteTelemetryStorage implements TelemetryStorage {
     });
   }
 
+  /** True when `filters` include something only applyPostFilters() can evaluate (SQL cannot). */
+  private hasPostFilters(filters: EntryFilters): boolean {
+    return Boolean(filters.method || filters.statusGroup || filters.search);
+  }
+
+  /** The SQL half of the filters: the type plus the columns SQLite can index. */
+  private buildWhere(
+    type: TelemetryEntryType,
+    filters: EntryFilters,
+  ): { where: string; params: (string | number)[] } {
+    const params: (string | number)[] = [type];
+    let where = 'WHERE type = ?';
+
+    if (filters.userIdentifier) {
+      where += ' AND user_identifier = ?';
+      params.push(filters.userIdentifier);
+    }
+    if (filters.tenantId) {
+      where += ' AND tenant_id = ?';
+      params.push(filters.tenantId);
+    }
+
+    return { where, params };
+  }
+
   private dbCount(): number {
     const row = this.db.prepare('SELECT COUNT(*) as cnt FROM telemetry_entries').get() as { cnt: number };
     return row.cnt;
@@ -171,43 +196,42 @@ export class SqliteTelemetryStorage implements TelemetryStorage {
   ): Promise<TelemetryEntry[]> {
     await this.flush();
 
-    const params: (string | number)[] = [type];
-    let where = 'WHERE type = ?';
+    const { where, params } = this.buildWhere(type, filters);
+    // `rowid` breaks ties between entries created in the same millisecond, so a page boundary
+    // never splits them differently from one request to the next.
+    const order = 'ORDER BY created_at DESC, rowid DESC';
 
-    if (filters.userIdentifier) {
-      where += ' AND user_identifier = ?';
-      params.push(filters.userIdentifier);
-    }
-    if (filters.tenantId) {
-      where += ' AND tenant_id = ?';
-      params.push(filters.tenantId);
+    if (!this.hasPostFilters(filters)) {
+      const sql = `SELECT * FROM telemetry_entries ${where} ${order} LIMIT ? OFFSET ?`;
+      const rows = this.db.prepare(sql).all(...params, size, page * size) as DbRow[];
+      return rows.map((r) => this.rowToEntry(r));
     }
 
-    params.push(size, page * size);
-    const sql = `SELECT * FROM telemetry_entries ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
-    const rows = this.db.prepare(sql).all(...params) as DbRow[];
-    const entries = rows.map((r) => this.rowToEntry(r));
-    return this.applyPostFilters(entries, filters);
+    // Filter first, paginate second. Cutting the page in SQL and filtering it afterwards returns
+    // short (even empty) pages and leaves countByType() disagreeing with what the pages contain.
+    const rows = this.db
+      .prepare(`SELECT * FROM telemetry_entries ${where} ${order}`)
+      .all(...params) as DbRow[];
+    const matching = this.applyPostFilters(rows.map((r) => this.rowToEntry(r)), filters);
+    return matching.slice(page * size, page * size + size);
   }
 
   async countByType(type: TelemetryEntryType, filters: EntryFilters): Promise<number> {
     await this.flush();
 
-    const params: (string | number)[] = [type];
-    let where = 'WHERE type = ?';
+    const { where, params } = this.buildWhere(type, filters);
 
-    if (filters.userIdentifier) {
-      where += ' AND user_identifier = ?';
-      params.push(filters.userIdentifier);
-    }
-    if (filters.tenantId) {
-      where += ' AND tenant_id = ?';
-      params.push(filters.tenantId);
+    if (!this.hasPostFilters(filters)) {
+      const sql = `SELECT COUNT(*) as cnt FROM telemetry_entries ${where}`;
+      const row = this.db.prepare(sql).get(...params) as { cnt: number };
+      return row.cnt;
     }
 
-    const sql = `SELECT COUNT(*) as cnt FROM telemetry_entries ${where}`;
-    const row = this.db.prepare(sql).get(...params) as { cnt: number };
-    return row.cnt;
+    // Count with the same predicate getByType() paginates with, so total and pages always agree.
+    const rows = this.db
+      .prepare(`SELECT * FROM telemetry_entries ${where}`)
+      .all(...params) as DbRow[];
+    return this.applyPostFilters(rows.map((r) => this.rowToEntry(r)), filters).length;
   }
 
   async getByUuid(uuid: string): Promise<TelemetryEntry | null> {

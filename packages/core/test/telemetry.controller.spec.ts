@@ -42,7 +42,37 @@ describe('TelemetryController', () => {
 
     const result = await controller.getEntries('LOG', 0, 50, '', '', '', '', '');
     expect(result.success).toBe(true);
-    expect(result.data).toHaveLength(1);
+    expect(result.data.entries).toHaveLength(1);
+    expect(result.data.total).toBe(1);
+  });
+
+  it('GET /entries reports every matching entry as total, not the length of the page', async () => {
+    for (let i = 0; i < 5; i++) {
+      await storage.store({
+        uuid: `page-${i}`,
+        type: TelemetryEntryType.LOG,
+        createdAt: new Date(2026, 0, 1, 0, 0, i),
+        batchId: '',
+        content: { level: i % 2 === 0 ? 'INFO' : 'ERROR', message: 'test' },
+        userIdentifier: '',
+        tenantId: '',
+        tags: [],
+      });
+    }
+
+    const secondPage = await controller.getEntries('LOG', 1, 2);
+    expect(secondPage.data.entries.map((e: { uuid: string }) => e.uuid)).toEqual(['page-2', 'page-1']);
+    expect(secondPage.data.total).toBe(5);
+
+    const filtered = await controller.getEntries('LOG', 0, 2, undefined, undefined, undefined, undefined, 'error');
+    expect(filtered.data.entries).toHaveLength(2);
+    expect(filtered.data.total).toBe(2);
+  });
+
+  it('GET /entries asks for a type', async () => {
+    const result = await controller.getEntries('');
+    expect(result.success).toBe(false);
+    expect(result.data).toBeNull();
   });
 
   it('POST /toggle toggles recording', async () => {

@@ -20,6 +20,11 @@ function error(message: string): ApiResponse {
   return { success: false, message, data: null };
 }
 
+/**
+ * The module mounts this controller at `basePath` (via RouterModule). Only the dashboard page is
+ * served there; every JSON route lives under `{basePath}/api`, which is where the dashboard and
+ * the README expect them. The dashboard/controller contract test pins this.
+ */
 @Injectable()
 @Controller()
 export class TelemetryController {
@@ -32,7 +37,7 @@ export class TelemetryController {
     res.type('text/html').send(html);
   }
 
-  @Get('entries')
+  @Get('api/entries')
   async getEntries(
     @Query('type') type: string,
     @Query('page') page: number = 0,
@@ -47,23 +52,23 @@ export class TelemetryController {
 
     const entryType = type as TelemetryEntryType;
     const filters = { userIdentifier, tenantId, method, statusGroup, search };
-    const entries = await this.storage.getByType(
-      entryType,
-      filters,
-      Number(page) || 0,
-      Number(size) || 50,
-    );
-    return success('ok', entries);
+    const [entries, total] = await Promise.all([
+      this.storage.getByType(entryType, filters, Number(page) || 0, Number(size) || 50),
+      // `total` is every entry matching the filters, not the length of this page: the dashboard
+      // paginates from it.
+      this.storage.countByType(entryType, filters),
+    ]);
+    return success('ok', { entries, total });
   }
 
-  @Get('entries/:uuid')
+  @Get('api/entries/:uuid')
   async getEntry(@Param('uuid') uuid: string): Promise<ApiResponse> {
     const entry = await this.storage.getByUuid(uuid);
     if (!entry) return error('Entry not found');
     return success('ok', entry);
   }
 
-  @Get('entries/:uuid/related')
+  @Get('api/entries/:uuid/related')
   async getRelatedEntries(@Param('uuid') uuid: string): Promise<ApiResponse> {
     const entry = await this.storage.getByUuid(uuid);
     if (!entry || !entry.batchId) return success('ok', []);
@@ -71,7 +76,7 @@ export class TelemetryController {
     return success('ok', related);
   }
 
-  @Get('filters')
+  @Get('api/filters')
   async getFilters(): Promise<ApiResponse> {
     const users = await this.storage.getDistinctUserIdentifiers();
     const tenants = await this.storage.getDistinctTenantIds();
@@ -83,13 +88,13 @@ export class TelemetryController {
     });
   }
 
-  @Get('stats')
+  @Get('api/stats')
   async getStats(): Promise<ApiResponse> {
     const stats = await this.storage.getStats();
     return success('ok', stats);
   }
 
-  @Get('status')
+  @Get('api/status')
   async getStatus(): Promise<ApiResponse> {
     const stats = await this.storage.getStats();
     const memory = await this.storage.getMemoryInfo();
@@ -100,33 +105,33 @@ export class TelemetryController {
     });
   }
 
-  @Get('tags')
+  @Get('api/tags')
   async getTags(): Promise<ApiResponse> {
     const tags = await this.storage.getDistinctTags();
     return success('ok', tags);
   }
 
-  @Get('memory')
+  @Get('api/memory')
   async getMemory(): Promise<ApiResponse> {
     const info = await this.storage.getMemoryInfo();
     return success('ok', info);
   }
 
-  @Post('toggle')
+  @Post('api/toggle')
   async toggle(): Promise<ApiResponse> {
     const newState = !this.storage.isEnabled();
     this.storage.setEnabled(newState);
     return success('ok', { enabled: newState });
   }
 
-  @Post('flush')
+  @Post('api/flush')
   async flush(): Promise<ApiResponse> {
     await this.storage.flush();
     const info = await this.storage.getMemoryInfo();
     return success('Buffer flushed', info);
   }
 
-  @Post('prune')
+  @Post('api/prune')
   async prune(@Query('hours') hours: number = 24): Promise<ApiResponse> {
     const h = Number(hours) || 24;
     const cutoff = new Date(Date.now() - h * 60 * 60 * 1000);
@@ -134,7 +139,7 @@ export class TelemetryController {
     return success('ok', { pruned, hours: h });
   }
 
-  @Post('prune/expired')
+  @Post('api/prune/expired')
   async pruneExpired(@Query('hours') hours: number = 24): Promise<ApiResponse> {
     const h = Number(hours) || 24;
     const cutoff = new Date(Date.now() - h * 60 * 60 * 1000);
@@ -142,7 +147,7 @@ export class TelemetryController {
     return success('ok', { pruned, retentionHours: h });
   }
 
-  @Delete('entries')
+  @Delete('api/entries')
   async clearEntries(@Query('type') type?: string): Promise<ApiResponse> {
     if (type) {
       await this.storage.clearByType(type as TelemetryEntryType);

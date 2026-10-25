@@ -1385,9 +1385,24 @@
                     return item?.type || null;
                 },
 
-                // API base - configurable via global variable
+                // API base: window.__TELEMETRY_BASE_PATH__ when a host page sets it, otherwise the
+                // path this page was served from, so it follows whatever basePath (and global
+                // prefix) the app mounts the dashboard under.
                 get apiBase() {
-                    return (window.__TELEMETRY_BASE_PATH__ || '/telemetry') + '/api';
+                    const base = window.__TELEMETRY_BASE_PATH__ || window.location.pathname.replace(/\/+$/, '');
+                    return base + '/api';
+                },
+
+                // Access token the page was opened with (?token=...), sent on every API call.
+                get accessToken() {
+                    return new URLSearchParams(window.location.search).get('token') || '';
+                },
+
+                // Every API call goes through here, so the base and the token are applied once.
+                api(path, init = {}) {
+                    const headers = Object.assign({}, init.headers);
+                    if (this.accessToken) headers['x-telemetry-token'] = this.accessToken;
+                    return fetch(this.apiBase + path, Object.assign({}, init, { headers }));
                 },
 
                 // Init
@@ -1477,7 +1492,7 @@
                 // Fetch
                 async fetchStats() {
                     try {
-                        const res = await fetch(this.apiBase + '/stats');
+                        const res = await this.api('/stats');
                         const json = await res.json();
                         this.stats = json.data || {};
                     } catch (e) { console.error('Failed to fetch stats:', e); }
@@ -1485,7 +1500,7 @@
 
                 async fetchRecentRequests() {
                     try {
-                        const res = await fetch(this.apiBase + '/entries?type=REQUEST&page=0&size=10');
+                        const res = await this.api('/entries?type=REQUEST&page=0&size=10');
                         const json = await res.json();
                         this.recentRequests = json.data?.entries || [];
                     } catch (e) { console.error('Failed to fetch recent requests:', e); }
@@ -1493,7 +1508,7 @@
 
                 async fetchFilters() {
                     try {
-                        const res = await fetch(this.apiBase + '/filters');
+                        const res = await this.api('/filters');
                         const json = await res.json();
                         this.filterOptions = {
                             users: json.data?.users || [],
@@ -1508,13 +1523,13 @@
                     const type = this.currentType;
                     if (!type) return;
                     try {
-                        let url = `${this.apiBase}/entries?type=${type}&page=${this.currentPage}&size=${this.pageSize}`;
-                        if (this.searchQuery) url += `&search=${encodeURIComponent(this.searchQuery)}`;
-                        if (this.filterUserIdentifier) url += `&userIdentifier=${encodeURIComponent(this.filterUserIdentifier)}`;
-                        if (this.filterTenantId) url += `&tenantId=${encodeURIComponent(this.filterTenantId)}`;
-                        if (this.filterMethod) url += `&method=${encodeURIComponent(this.filterMethod)}`;
-                        if (this.filterStatusGroup) url += `&statusGroup=${encodeURIComponent(this.filterStatusGroup)}`;
-                        const res = await fetch(url);
+                        let path = `/entries?type=${type}&page=${this.currentPage}&size=${this.pageSize}`;
+                        if (this.searchQuery) path += `&search=${encodeURIComponent(this.searchQuery)}`;
+                        if (this.filterUserIdentifier) path += `&userIdentifier=${encodeURIComponent(this.filterUserIdentifier)}`;
+                        if (this.filterTenantId) path += `&tenantId=${encodeURIComponent(this.filterTenantId)}`;
+                        if (this.filterMethod) path += `&method=${encodeURIComponent(this.filterMethod)}`;
+                        if (this.filterStatusGroup) path += `&statusGroup=${encodeURIComponent(this.filterStatusGroup)}`;
+                        const res = await this.api(path);
                         const json = await res.json();
                         this.entries = json.data?.entries || [];
                         this.totalEntries = json.data?.total || 0;
@@ -1523,7 +1538,7 @@
 
                 async fetchRelated(uuid) {
                     try {
-                        const res = await fetch(this.apiBase + '/entries/' + uuid + '/related');
+                        const res = await this.api('/entries/' + uuid + '/related');
                         const json = await res.json();
                         this.relatedEntries = json.data || [];
                     } catch (e) { this.relatedEntries = []; }
@@ -1584,9 +1599,9 @@
                 // Toggle enabled
                 async toggleEnabled() {
                     try {
-                        const res = await fetch(this.apiBase + '/toggle', { method: 'POST' });
+                        const res = await this.api('/toggle', { method: 'POST' });
                         const json = await res.json();
-                        this.enabled = json.data;
+                        this.enabled = json.data?.enabled ?? this.enabled;
                     } catch (e) { console.error('Failed to toggle:', e); }
                 },
 
@@ -1596,7 +1611,7 @@
                     const type = this.currentType;
                     if (!type) return;
                     try {
-                        await fetch(this.apiBase + '/entries?type=' + type, { method: 'DELETE' });
+                        await this.api('/entries?type=' + type, { method: 'DELETE' });
                         this.entries = [];
                         this.totalEntries = 0;
                         this.selectedEntry = null;
@@ -1607,7 +1622,7 @@
                 // Prune
                 async pruneEntries() {
                     try {
-                        const res = await fetch(this.apiBase + '/prune?hours=24', { method: 'POST' });
+                        const res = await this.api('/prune?hours=24', { method: 'POST' });
                         const json = await res.json();
                         const pruned = json.data?.pruned || 0;
                         this.pruneResult = `Pruned ${pruned} entries`;
