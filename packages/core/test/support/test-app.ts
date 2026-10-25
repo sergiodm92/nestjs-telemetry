@@ -97,6 +97,12 @@ export class DemoController {
     };
   }
 
+  /** An error envelope like the ones APIs answer: `code` is a status code, `otp` is not. */
+  @Get('coded')
+  coded() {
+    return { code: '401', status: 'UNAUTHORIZED', accessToken: 'AT-SECRET', otp: '123456' };
+  }
+
   /** Far past the 10 000 characters the dashboard shows, with a secret first. */
   @Get('long-secret')
   longSecret() {

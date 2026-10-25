@@ -37,6 +37,17 @@ describe.each([
     expect(content.responseHeaders['content-type']).toContain('application/json');
   });
 
+  it('keeps an error `code` readable in a response, where it is a status code, and masks the rest', async () => {
+    const { content } = await fetchAndRecord('/demo/coded');
+
+    expect(JSON.parse(content.responseBody)).toEqual({
+      code: '401',
+      status: 'UNAUTHORIZED',
+      accessToken: '***',
+      otp: '***',
+    });
+  });
+
   it('stores the body of an error response, whoever wrote it', async () => {
     const { content } = await fetchAndRecord('/demo/missing');
 

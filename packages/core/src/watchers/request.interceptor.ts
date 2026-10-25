@@ -55,40 +55,28 @@ const SENSITIVE_KEY_NAMES = [
 // `eyJ`. Matched by shape, wherever it sits: a token under an innocent key is still a token.
 const JWT_PATTERN = /eyJ[\w-]{5,}\.eyJ[\w-]{5,}\.[\w-]*/g;
 
-function isSensitiveKey(key: string): boolean {
+// What a client SENDS has `code` as a verification code. What a server ANSWERS has it as an error
+// or status code (`{"code":"401","status":"UNAUTHORIZED"}`), and masking that hides nothing worth
+// hiding while making every error look broken. A real code in a response still falls to the
+// other names, or to the JWT shape.
+const RESPONSE_KEY_NAMES = SENSITIVE_KEY_NAMES.filter((name) => name !== 'code');
+
+function isSensitiveKey(key: string, names: readonly string[] = SENSITIVE_KEY_NAMES): boolean {
   const normalized = key.toLowerCase().replace(/[\s._-]/g, '');
   return (
-    SENSITIVE_KEY_NAMES.includes(normalized) ||
+    names.includes(normalized) ||
     SENSITIVE_KEY_PARTS.some((part) => normalized.includes(part))
   );
 }
 
 // Free text has no keys to compare: it is sensitive when it contains a long name anywhere, or has
 // a short name as a word of its own.
-function mentionsSensitiveKey(text: string): boolean {
+function mentionsSensitiveKey(text: string, names: readonly string[]): boolean {
   const compact = text.toLowerCase().replace(/[\s._-]/g, '');
   return (
     SENSITIVE_KEY_PARTS.some((part) => compact.includes(part)) ||
-    text
-      .split(/[^a-z0-9]+/i)
-      .some((word) => SENSITIVE_KEY_NAMES.includes(word.toLowerCase()))
+    text.split(/[^a-z0-9]+/i).some((word) => names.includes(word.toLowerCase()))
   );
-}
-
-// Runs for every key at every depth, arrays included, after `toJSON` (so a Date is already a string).
-function redactReplacer(key: string, value: unknown): unknown {
-  if (key && isSensitiveKey(key)) return REDACTED;
-  if (typeof value !== 'string') return value;
-  // A document carried as a string is read as one, so the fields inside it are masked too. What
-  // is returned is walked by this same function, key by key.
-  if (/^\s*[{[]/.test(value)) {
-    try {
-      return JSON.parse(value);
-    } catch {
-      // Not JSON after all: a plain string.
-    }
-  }
-  return value.replace(JWT_PATTERN, REDACTED);
 }
 
 // Masks the value of every `key=value` pair whose key is sensitive; the rest is kept byte for byte.
@@ -123,16 +111,38 @@ function redactUrl(value: string): string {
   return address + fragment;
 }
 
-// A text body is JSON often enough (a client that omits the content type) to be worth parsing; one
-// that is not is kept only when it never names a sensitive field (`password=...&email=...`).
-function redactText(text: string): string {
-  try {
-    return JSON.stringify(JSON.parse(text), redactReplacer);
-  } catch {
-    const masked = text.replace(JWT_PATTERN, REDACTED);
-    return mentionsSensitiveKey(masked) ? REDACTED : masked;
-  }
+// The masking of a body, for the short names that apply to it. `replacer` runs for every key at
+// every depth, arrays included, after `toJSON` (so a Date is already a string). `text` serialises a
+// text body: it is JSON often enough (a client that omits the content type) to be worth parsing,
+// and one that is not is kept only when it never names a sensitive field (`password=...`).
+function redactorFor(names: readonly string[]) {
+  const replacer = (key: string, value: unknown): unknown => {
+    if (key && isSensitiveKey(key, names)) return REDACTED;
+    if (typeof value !== 'string') return value;
+    // A document carried as a string is read as one, so the fields inside it are masked too. What
+    // is returned is walked by this same function, key by key.
+    if (/^\s*[{[]/.test(value)) {
+      try {
+        return JSON.parse(value);
+      } catch {
+        // Not JSON after all: a plain string.
+      }
+    }
+    return value.replace(JWT_PATTERN, REDACTED);
+  };
+  const text = (body: string): string => {
+    try {
+      return JSON.stringify(JSON.parse(body), replacer);
+    } catch {
+      const masked = body.replace(JWT_PATTERN, REDACTED);
+      return mentionsSensitiveKey(masked, names) ? REDACTED : masked;
+    }
+  };
+  return { replacer, text };
 }
+
+const requestRedactor = redactorFor(SENSITIVE_KEY_NAMES);
+const responseRedactor = redactorFor(RESPONSE_KEY_NAMES);
 
 function truncate(text: string): string {
   return text.length > MAX_BODY_LENGTH
@@ -283,7 +293,7 @@ export function watchResponseBody(
         return NON_TEXT_RESPONSE;
       }
     }
-    const body = redactText(text);
+    const body = responseRedactor.text(text);
     return finished ? body : `${body} [response incomplete: the connection closed first]`;
   };
 }
@@ -474,8 +484,8 @@ export class TelemetryRequestInterceptor implements NestInterceptor {
     // Redact before truncating: cutting first could leave half a JSON document that no longer parses.
     const str =
       typeof body === 'string'
-        ? redactText(body)
-        : JSON.stringify(body, redactReplacer);
+        ? requestRedactor.text(body)
+        : JSON.stringify(body, requestRedactor.replacer);
     return truncate(str);
   }
 }
