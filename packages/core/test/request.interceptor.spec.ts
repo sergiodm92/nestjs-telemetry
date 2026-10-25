@@ -123,6 +123,163 @@ describe('TelemetryRequestInterceptor', () => {
     expect(entries[0].content.requestBody.length).toBeLessThanOrEqual(10000 + 50);
   });
 
+  describe('request body redaction', () => {
+    async function recordedContent(req: any): Promise<any> {
+      await lastValueFrom(
+        interceptor.intercept(mockExecutionContext(req), mockCallHandler()),
+      );
+      const entries = await storage.getByType(TelemetryEntryType.REQUEST, {}, 0, 10);
+      return entries[0].content;
+    }
+
+    async function recordedBody(body: any): Promise<string> {
+      return (await recordedContent({ body })).requestBody;
+    }
+
+    it('masks sensitive fields at any depth, arrays included, and keeps the rest', async () => {
+      const stored = JSON.parse(
+        await recordedBody({
+          email: 'ana@example.com',
+          password: 'hunter2',
+          profile: { newPassword: 'p1', refresh_token: 't1', name: 'Ana' },
+          items: [{ 'X-Api-Key': 'k1', sku: 'a-1' }],
+          clientSecret: 's1',
+        }),
+      );
+
+      expect(stored).toEqual({
+        email: 'ana@example.com',
+        password: '***',
+        profile: { newPassword: '***', refresh_token: '***', name: 'Ana' },
+        items: [{ 'X-Api-Key': '***', sku: 'a-1' }],
+        clientSecret: '***',
+      });
+    });
+
+    it('keeps a Date field readable instead of dropping it', async () => {
+      const stored = JSON.parse(
+        await recordedBody({ at: new Date('2026-10-25T03:00:00.000Z'), password: 'x' }),
+      );
+
+      expect(stored).toEqual({ at: '2026-10-25T03:00:00.000Z', password: '***' });
+    });
+
+    it('masks a JSON document that arrives as a string', async () => {
+      const stored = JSON.parse(await recordedBody('{"password":"hunter2","a":1}'));
+
+      expect(stored).toEqual({ password: '***', a: 1 });
+    });
+
+    it.each([
+      'password',
+      'passwd',
+      'passcode',
+      'secret',
+      'accessToken',
+      'apiKey',
+      'api key',
+      'api.key',
+      'authorization',
+      'cardNumber',
+      'card number',
+      'cvv',
+      'cvc',
+      'privateKey',
+      'credentials',
+      'twoFactorCode',
+      'code',
+      'otp',
+      'pin',
+      'pwd',
+      'pass',
+      'jwt',
+      'auth',
+      'bearer',
+      'cookie',
+    ])('masks a field called %s', async (field) => {
+      const stored = JSON.parse(await recordedBody({ [field]: 'value-to-hide' }));
+
+      expect(stored).toEqual({ [field]: '***' });
+    });
+
+    it.each(['statusCode', 'postcode', 'barcode', 'discountCode', 'shipping', 'pinned', 'passenger'])(
+      'keeps a field called %s, whose name only contains a short sensitive one',
+      async (field) => {
+        const stored = JSON.parse(await recordedBody({ [field]: 'visible' }));
+
+        expect(stored).toEqual({ [field]: 'visible' });
+      },
+    );
+
+    it('replaces a text body that names a sensitive field', async () => {
+      expect(await recordedBody('password=hunter2&email=ana@example.com')).toBe('***');
+    });
+
+    it('keeps a text body that names none', async () => {
+      expect(await recordedBody('hello there')).toBe('hello there');
+    });
+
+    it('masks the value of a sensitive query parameter and keeps the rest as written', async () => {
+      const content = await recordedContent({
+        originalUrl: '/api/auth/logout?refreshToken=abc.def&page=1&x%2Dapi%2Dkey=k1&flag',
+      });
+
+      expect(content.queryString).toBe('refreshToken=***&page=1&x%2Dapi%2Dkey=***&flag');
+    });
+
+    it('masks sensitive request headers by name, not only the three well known ones', async () => {
+      const content = await recordedContent({
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer abc',
+          cookie: 'sid=1',
+          'x-api-key': 'k1',
+          'x-auth-token': 't1',
+          'proxy-authorization': 'Basic zzz',
+          'x-request-id': 'r-1',
+        },
+      });
+
+      expect(content.requestHeaders).toEqual({
+        'content-type': 'application/json',
+        authorization: '***',
+        cookie: '***',
+        'x-api-key': '***',
+        'x-auth-token': '***',
+        'proxy-authorization': '***',
+        'x-request-id': 'r-1',
+      });
+    });
+
+    it('does not store the bytes of a raw body', async () => {
+      const stored = await recordedBody(Buffer.from('{"password":"hunter2"}'));
+
+      expect(stored).toBe('[binary body omitted]');
+    });
+
+    it('records nothing, and does not throw, when the body cannot be serialised', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      const body: any = { password: 'hunter2' };
+      body.self = body;
+
+      await expect(
+        lastValueFrom(interceptor.intercept(mockExecutionContext({ body }), mockCallHandler())),
+      ).resolves.toBeDefined();
+
+      expect(await storage.getByType(TelemetryEntryType.REQUEST, {}, 0, 10)).toHaveLength(0);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('hunter2');
+      warn.mockRestore();
+    });
+
+    it('never lets a secret through when the body is truncated', async () => {
+      const stored = await recordedBody({ password: 'hunter2', data: 'x'.repeat(20000) });
+
+      expect(stored).not.toContain('hunter2');
+      expect(stored.length).toBeLessThanOrEqual(10000 + 50);
+    });
+  });
+
   it('does not record when storage is disabled', async () => {
     storage.setEnabled(false);
     const ctx = mockExecutionContext();

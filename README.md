@@ -27,7 +27,7 @@ Open `http://localhost:3000/telemetry` and you're done.
 - **Two storage backends**: In-memory (default) or SQLite for persistence
 - **Single-page dashboard**: Alpine.js + Tailwind CSS, no build step required
 - **Batch correlation**: All entries from a single HTTP request are linked via batch ID
-- **Sensitive data masking**: Authorization, Cookie, Set-Cookie headers are automatically masked
+- **Sensitive data masking**: a request header, query parameter or body field (at any depth) is masked by its name: when it contains `password`, `passwd`, `passcode`, `secret`, `token`, `apikey`, `authorization`, `cardnumber`, `cvv`, `cvc`, `privatekey`, `credential` or `twofactor` (case, `-`, `_`, `.` and spaces ignored), or is exactly `code`, `otp`, `pin`, `pwd`, `pass`, `jwt`, `auth`, `bearer` or `cookie`. Raw (binary) bodies are not stored. **Not masked:** values under an innocent name, URL paths (`/orders/track/:token`), SQL parameters and exception messages.
 - **Body truncation**: Request bodies capped at 10KB, stack traces at 5KB
 - **Access token protection**: Optional token-based security for the dashboard
 - **Multi-tenancy**: Built-in userIdentifier and tenantId filtering

@@ -15,6 +15,93 @@ import { TelemetryUserProvider } from '../context/telemetry-user.provider';
 
 const MAX_BODY_LENGTH = 10000;
 const SENSITIVE_HEADERS = ['authorization', 'cookie', 'set-cookie'];
+const REDACTED = '***';
+// A key is sensitive when its normalised form (lower-cased, without `-`, `_`, `.` or spaces, so
+// `new_password`, `refreshToken`, `X-Api-Key` and `card number` all match) CONTAINS one of these.
+// Over-masking (`tokenType`) is on purpose: a dashboard that hides one field too many is a
+// nuisance, one that shows a credential is a leak.
+const SENSITIVE_KEY_PARTS = [
+  'password',
+  'passwd',
+  'passcode',
+  'secret',
+  'token',
+  'apikey',
+  'authorization',
+  'cardnumber',
+  'cvv',
+  'cvc',
+  'privatekey',
+  'credential',
+  'twofactor',
+];
+// Short names that would also hit innocent keys as a substring (`postcode`, `shipping`,
+// `statusCode`), so the whole normalised key has to equal one.
+const SENSITIVE_KEY_NAMES = [
+  'code',
+  'otp',
+  'pin',
+  'pwd',
+  'pass',
+  'jwt',
+  'auth',
+  'bearer',
+  'cookie',
+];
+
+function isSensitiveKey(key: string): boolean {
+  const normalized = key.toLowerCase().replace(/[\s._-]/g, '');
+  return (
+    SENSITIVE_KEY_NAMES.includes(normalized) ||
+    SENSITIVE_KEY_PARTS.some((part) => normalized.includes(part))
+  );
+}
+
+// Free text has no keys to compare: it is sensitive when it contains a long name anywhere, or has
+// a short name as a word of its own.
+function mentionsSensitiveKey(text: string): boolean {
+  const compact = text.toLowerCase().replace(/[\s._-]/g, '');
+  return (
+    SENSITIVE_KEY_PARTS.some((part) => compact.includes(part)) ||
+    text
+      .split(/[^a-z0-9]+/i)
+      .some((word) => SENSITIVE_KEY_NAMES.includes(word.toLowerCase()))
+  );
+}
+
+// Runs for every key at every depth, arrays included, after `toJSON` (so a Date is already a string).
+function redactReplacer(key: string, value: unknown): unknown {
+  return key && isSensitiveKey(key) ? REDACTED : value;
+}
+
+// Masks the value of every `key=value` pair whose key is sensitive; the rest is kept byte for byte.
+function redactQueryString(query: string): string {
+  return query
+    .split('&')
+    .map((pair) => {
+      const separator = pair.indexOf('=');
+      if (separator === -1) return pair;
+      const rawKey = pair.slice(0, separator);
+      let key = rawKey;
+      try {
+        key = decodeURIComponent(rawKey.replace(/\+/g, ' '));
+      } catch {
+        // A key that is not valid percent-encoding is compared as written.
+      }
+      return isSensitiveKey(key) ? `${rawKey}=${REDACTED}` : pair;
+    })
+    .join('&');
+}
+
+// A text body is JSON often enough (a client that omits the content type) to be worth parsing; one
+// that is not is kept only when it never names a sensitive field (`password=...&email=...`).
+function redactText(text: string): string {
+  try {
+    return JSON.stringify(JSON.parse(text), redactReplacer);
+  } catch {
+    return mentionsSensitiveKey(text) ? REDACTED : text;
+  }
+}
 
 /**
  * Records one REQUEST entry per HTTP request, when its response ends.
@@ -125,7 +212,7 @@ export class TelemetryRequestInterceptor implements NestInterceptor {
       content: {
         method: req.method,
         uri: req.path || req.url,
-        queryString: req.originalUrl?.split('?')[1] || '',
+        queryString: redactQueryString(req.originalUrl?.split('?')[1] || ''),
         status: res.statusCode,
         duration,
         ipAddress: req.ip || req.connection?.remoteAddress || '',
@@ -148,16 +235,24 @@ export class TelemetryRequestInterceptor implements NestInterceptor {
   private maskHeaders(headers: Record<string, any>): Record<string, string> {
     const masked: Record<string, string> = {};
     for (const [key, value] of Object.entries(headers)) {
-      masked[key] = SENSITIVE_HEADERS.includes(key.toLowerCase())
-        ? '***'
-        : String(value);
+      masked[key] =
+        SENSITIVE_HEADERS.includes(key.toLowerCase()) || isSensitiveKey(key)
+          ? REDACTED
+          : String(value);
     }
     return masked;
   }
 
   private truncateBody(body: any): string {
     if (!body) return '';
-    const str = typeof body === 'string' ? body : JSON.stringify(body);
+    // A raw body (`express.raw`) would serialise as a list of byte values nobody reads but anyone
+    // can decode.
+    if (Buffer.isBuffer(body)) return '[binary body omitted]';
+    // Redact before truncating: cutting first could leave half a JSON document that no longer parses.
+    const str =
+      typeof body === 'string'
+        ? redactText(body)
+        : JSON.stringify(body, redactReplacer);
     if (str.length > MAX_BODY_LENGTH) {
       return str.substring(0, MAX_BODY_LENGTH) + '... [truncated]';
     }

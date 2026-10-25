@@ -1,6 +1,6 @@
 {
   "name": "@nestjs-telemetry/core",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Zero-config real-time debugging dashboard for NestJS",
   "license": "MIT",
   "repository": {
