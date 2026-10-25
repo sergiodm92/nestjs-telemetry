@@ -6,12 +6,14 @@ import {
   Controller,
   ExceptionFilter,
   Get,
+  HttpCode,
   HttpException,
   INestApplication,
   NotFoundException,
   Param,
   ParseIntPipe,
   Post,
+  Res,
   UseGuards,
 } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
@@ -26,6 +28,9 @@ import { TelemetryModuleOptions } from '../../src/telemetry.options';
 import { SqliteTelemetryStorage } from '../../src/storage/sqlite.storage';
 import { TelemetryStorage } from '../../src/storage/telemetry-storage.interface';
 import { TelemetryEntryType } from '../../src/model/telemetry-entry-type';
+
+/** A well formed JWT (header and payload are JSON, signature is anything). */
+export const SAMPLE_JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl';
 
 /** A domain error the host's exception filter maps to a status Nest knows nothing about. */
 export class DomainConflictError extends Error {}
@@ -79,6 +84,90 @@ export class DemoController {
   @Get('many')
   many() {
     return from([1, 2, 3]);
+  }
+
+  /** What a login answers: tokens under the usual names, and a field that is safe to show. */
+  @Get('login-result')
+  loginResult() {
+    return {
+      user: 'ana',
+      accessToken: 'AT-SECRET',
+      refresh_token: 'RT-SECRET',
+      profile: { name: 'Ana' },
+    };
+  }
+
+  /** Far past the 10 000 characters the dashboard shows, with a secret first. */
+  @Get('long-secret')
+  longSecret() {
+    return { accessToken: 'AT-SECRET', data: 'x'.repeat(30000) };
+  }
+
+  /** Larger than the 256 KB the watcher is willing to hold. */
+  @Get('huge')
+  huge() {
+    return { data: 'x'.repeat(300000) };
+  }
+
+  /** Real bytes: a Buffer returned from a handler is serialised as JSON by Nest, so send it by hand. */
+  @Get('image')
+  image(@Res() res: any) {
+    res.type('image/png').send(Buffer.from('not-really-a-png'));
+  }
+
+  /** Sets response headers a dashboard should never show. */
+  @Get('cookie')
+  cookie(@Res({ passthrough: true }) res: any) {
+    res.setHeader('set-cookie', 'sid=SESSION-SECRET');
+    res.setHeader('x-api-key', 'K-SECRET');
+    return { ok: true };
+  }
+
+  /** Written in two pieces, with the secret in the second. */
+  @Get('chunks')
+  chunks(@Res() res: any) {
+    res.type('application/json');
+    res.write('{"a":');
+    res.end('1,"password":"PW-SECRET"}');
+  }
+
+  /** Redirects with secrets in the query string and in the fragment. */
+  @Get('redirect')
+  redirect(@Res() res: any) {
+    res.redirect(302, 'https://app.example/cb?access_token=AT-SECRET&state=ok#id_token=ID-SECRET&x=1');
+  }
+
+  /** A JSON value that is itself a JSON document, as an API with a payload column answers. */
+  @Get('nested-json')
+  nestedJson() {
+    return { payload: JSON.stringify({ password: 'PW-SECRET', ok: 1 }), note: 'fine' };
+  }
+
+  /** A bare JWT as the whole body, under no field name at all. */
+  @Get('jwt-text')
+  jwtText(@Res() res: any) {
+    res.type('text/plain').send(SAMPLE_JWT);
+  }
+
+  @Get('empty')
+  @HttpCode(204)
+  empty() {
+    return undefined;
+  }
+
+  /** JSON in UTF-16: read as UTF-8, a NUL byte splits every field name. */
+  @Get('wide')
+  wide(@Res() res: any) {
+    res
+      .type('application/json; charset=utf-16le')
+      .send(Buffer.from('{"password":"PW-SECRET"}', 'utf16le'));
+  }
+
+  /** Headers handed to writeHead never reach getHeader: this is how Fastify answers. */
+  @Get('writehead')
+  writeHead(@Res() res: any) {
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end('{"token":"T-SECRET","a":1}');
   }
 
   /** Rejected by a guard, so the request never reaches an interceptor. */

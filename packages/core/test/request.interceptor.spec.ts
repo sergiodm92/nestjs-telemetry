@@ -280,6 +280,86 @@ describe('TelemetryRequestInterceptor', () => {
     });
   });
 
+  describe('what hides in values and addresses', () => {
+    const JWT = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl';
+
+    async function recordedContent(req: any): Promise<any> {
+      await lastValueFrom(
+        interceptor.intercept(mockExecutionContext(req), mockCallHandler()),
+      );
+      const entries = await storage.getByType(TelemetryEntryType.REQUEST, {}, 0, 10);
+      return entries[0].content;
+    }
+
+    it('masks a JWT wherever it sits, and a document carried as a string', async () => {
+      const { requestBody } = await recordedContent({
+        body: {
+          note: `see ${JWT} for details`,
+          data: [JWT],
+          payload: '{"password":"hunter2","ok":1}',
+        },
+      });
+
+      expect(JSON.parse(requestBody)).toEqual({
+        note: 'see *** for details',
+        data: ['***'],
+        payload: { password: '***', ok: 1 },
+      });
+    });
+
+    it('masks a JWT sent as a plain text body', async () => {
+      const { requestBody } = await recordedContent({ body: JWT });
+
+      expect(requestBody).toBe('***');
+    });
+
+    it('masks the query string and the fragment of an address header', async () => {
+      const { requestHeaders } = await recordedContent({
+        headers: {
+          referer: 'https://app.example/cb?code=C1&page=2#id_token=T1&x=1',
+          origin: 'https://app.example',
+        },
+      });
+
+      expect(requestHeaders).toEqual({
+        referer: 'https://app.example/cb?code=***&page=2#id_token=***&x=1',
+        origin: 'https://app.example',
+      });
+    });
+
+    it('records the request, without its response, when the response refuses to be wrapped', async () => {
+      const warn = jest.spyOn(Logger.prototype, 'warn').mockImplementation();
+      const listeners: Array<() => void> = [];
+      const frozen = Object.freeze({
+        statusCode: 200,
+        once: (_event: string, listener: () => void) => {
+          listeners.push(listener);
+        },
+        write: () => true,
+        end: () => undefined,
+        getHeader: () => undefined,
+        getHeaders: () => ({}),
+      });
+      const base = mockExecutionContext();
+      const req = base.switchToHttp().getRequest();
+      const ctx = {
+        ...base,
+        switchToHttp: () => ({ getRequest: () => req, getResponse: () => frozen }),
+      };
+
+      await expect(
+        lastValueFrom(interceptor.intercept(ctx, mockCallHandler())),
+      ).resolves.toBeDefined();
+      listeners.forEach((listener) => listener());
+
+      const entries = await storage.getByType(TelemetryEntryType.REQUEST, {}, 0, 10);
+      expect(entries).toHaveLength(1);
+      expect(entries[0].content.responseBody).toBe('');
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('Could not watch the response'));
+      warn.mockRestore();
+    });
+  });
+
   it('does not record when storage is disabled', async () => {
     storage.setEnabled(false);
     const ctx = mockExecutionContext();
