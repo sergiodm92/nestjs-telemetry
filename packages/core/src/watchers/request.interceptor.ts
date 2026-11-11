@@ -53,7 +53,10 @@ const SENSITIVE_KEY_NAMES = [
 ];
 // A signed JWT is three base64url parts and the first two are JSON objects, so both start with
 // `eyJ`. Matched by shape, wherever it sits: a token under an innocent key is still a token.
-const JWT_PATTERN = /eyJ[\w-]{5,}\.eyJ[\w-]{5,}\.[\w-]*/g;
+// The lookbehind makes a match start only where a run of base64url characters starts: without
+// it, a body of `eyJeyJeyJ...` is tried from every `eyJ` to the end of the run, which is
+// quadratic and lets a 100 KB request body hold the event loop for seconds.
+const JWT_PATTERN = /(?<![\w-])eyJ[\w-]{5,}\.eyJ[\w-]{5,}\.[\w-]*/g;
 
 // What a client SENDS has `code` as a verification code. What a server ANSWERS has it as an error
 // or status code (`{"code":"401","status":"UNAUTHORIZED"}`), and masking that hides nothing worth
@@ -93,9 +96,28 @@ function redactQueryString(query: string): string {
       } catch {
         // A key that is not valid percent-encoding is compared as written.
       }
-      return isSensitiveKey(key) ? `${rawKey}=${REDACTED}` : pair;
+      return isSensitiveKey(key) || carriesSensitiveQuery(pair.slice(separator + 1))
+        ? `${rawKey}=${REDACTED}`
+        : pair;
     })
     .join('&');
+}
+
+// A value that is itself an address or a query string with a sensitive key in it
+// (`?next=https://app/reset?token=...`, `?redirect=%2Faccept%3Ftoken%3D...`): the whole value is
+// masked, since its own pairs are not split above. Split, not matched, so it stays linear.
+function carriesSensitiveQuery(value: string): boolean {
+  if (!value.includes('=') && !/%3d/i.test(value)) return false;
+  let decoded = value;
+  try {
+    decoded = decodeURIComponent(value.replace(/\+/g, ' '));
+  } catch {
+    // Compared as written.
+  }
+  return decoded.split(/[?&#;]/).some((part) => {
+    const separator = part.indexOf('=');
+    return separator > 0 && isSensitiveKey(part.slice(0, separator).split(/[\\/]/).pop() ?? '');
+  });
 }
 
 // An address with the query string and the fragment masked the way a query string is.
@@ -109,6 +131,21 @@ function redactUrl(value: string): string {
       ? beforeHash
       : `${beforeHash.slice(0, query + 1)}${redactQueryString(beforeHash.slice(query + 1))}`;
   return address + fragment;
+}
+
+// An address written out in free text, `href="..."` included. It stops at whitespace, quotes,
+// angle brackets and parentheses, so the markup around a link (`url(...)` in a style) is never
+// taken as part of it.
+const URL_IN_TEXT = /\bhttps?:\/\/[^\s"'<>()]+/gi;
+
+/**
+ * Free text with no field names to go by (a mail body, HTML included), masked by what can still be
+ * recognised: every JWT by its shape, and the query string and fragment of every URL the way a
+ * query string is (`https://app/reset?token=...` keeps the address and loses the token; an
+ * `&amp;` between pairs does not hide a sensitive name).
+ */
+export function redactText(text: string): string {
+  return text.replace(URL_IN_TEXT, (url) => redactUrl(url)).replace(JWT_PATTERN, REDACTED);
 }
 
 // The masking of a body, for the short names that apply to it. `replacer` runs for every key at
