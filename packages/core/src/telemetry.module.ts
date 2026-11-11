@@ -5,7 +5,13 @@ import {
   NestInterceptor,
   Provider,
 } from '@nestjs/common';
-import { APP_GUARD, APP_INTERCEPTOR, RouterModule } from '@nestjs/core';
+import {
+  APP_GUARD,
+  APP_INTERCEPTOR,
+  DiscoveryModule,
+  DiscoveryService,
+  RouterModule,
+} from '@nestjs/core';
 import {
   TelemetryModuleOptions,
   DEFAULT_OPTIONS,
@@ -30,6 +36,7 @@ import { TelemetryScheduleWatcher } from './watchers/schedule.watcher';
 import { TelemetryCacheInterceptor } from './watchers/cache.interceptor';
 import { TelemetryEventWatcher } from './watchers/event.watcher';
 import { TelemetryMailWatcher } from './watchers/mail.watcher';
+import { TelemetryMailInstrumentation } from './watchers/mail.instrumentation';
 import { TelemetrySecurityGuard } from './watchers/security.guard';
 import { TelemetryPrunerService } from './pruner/telemetry-pruner.service';
 
@@ -110,9 +117,23 @@ function buildWatcherProviders(): Provider[] {
     },
     {
       provide: TelemetryMailWatcher,
-      useFactory: (storage: TelemetryStorage) =>
-        new TelemetryMailWatcher(storage),
-      inject: [TELEMETRY_STORAGE],
+      // `!== false`: a `watchers: { mail: undefined }` (a config value that is not set) keeps the
+      // default, it does not turn mail off.
+      useFactory: (opts: ResolvedOptions, storage: TelemetryStorage) =>
+        new TelemetryMailWatcher(storage, opts.watchers.mail !== false),
+      inject: [TELEMETRY_OPTIONS, TELEMETRY_STORAGE],
+    },
+    // Mail is the one passive watcher that needs no code in the host: at bootstrap this finds the
+    // nodemailer transporters / MailerService among the providers and instruments them.
+    {
+      provide: TelemetryMailInstrumentation,
+      useFactory: (
+        opts: ResolvedOptions,
+        discovery: DiscoveryService,
+        watcher: TelemetryMailWatcher,
+      ) =>
+        new TelemetryMailInstrumentation(discovery, watcher, opts.watchers.mail !== false),
+      inject: [TELEMETRY_OPTIONS, DiscoveryService, TelemetryMailWatcher],
     },
     // Global bindings. Registration order = execution order: the request
     // interceptor is outermost so it establishes the TelemetryContext (batchId)
@@ -183,6 +204,7 @@ export class TelemetryModule {
       module: TelemetryModule,
       global: true,
       imports: [
+        DiscoveryModule,
         RouterModule.register([
           { path: mergedOptions.basePath, module: TelemetryModule },
         ]),
@@ -216,6 +238,7 @@ export class TelemetryModule {
       global: true,
       imports: [
         ...(optionsFactory.imports || []),
+        DiscoveryModule,
         RouterModule.register([
           {
             path: optionsFactory.basePath || DEFAULT_OPTIONS.basePath,

@@ -18,5 +18,10 @@ export { TelemetryLogWatcher } from './watchers/log.watcher';
 export { TelemetryScheduleWatcher } from './watchers/schedule.watcher';
 export { TelemetryCacheInterceptor } from './watchers/cache.interceptor';
 export { TelemetryEventWatcher } from './watchers/event.watcher';
-export { TelemetryMailWatcher, MailInfo } from './watchers/mail.watcher';
+export {
+  TelemetryMailWatcher,
+  MailInfo,
+  MailAddress,
+  MailAddresses,
+} from './watchers/mail.watcher';
 export { TelemetrySecurityGuard } from './watchers/security.guard';

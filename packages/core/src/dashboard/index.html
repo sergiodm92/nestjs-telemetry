@@ -76,6 +76,8 @@
         .badge-created { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
         .badge-updated { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
         .badge-deleted { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
+        .badge-sent { background: rgba(34, 197, 94, 0.15); color: #22c55e; }
+        .badge-failed { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
 
         .tag-chip {
             font-size: 10px;
@@ -751,6 +753,7 @@
                                          :style="entry._child ? 'padding-left: 2.5rem; opacity: 0.6' : ''"
                                          class="entry-row px-4 py-3 cursor-pointer">
                                         <div class="flex items-center gap-3">
+                                            <span x-show="entry.content?.status === 'failed'" class="badge text-xs badge-failed">FAILED</span>
                                             <span class="text-pink-400 text-sm truncate flex-1" x-text="entry.content?.subject || '(no subject)'"></span>
                                             <span class="text-xs text-gray-500 font-mono" x-text="entry.content?.to"></span>
                                             <span class="text-xs text-gray-600 w-16 text-right" x-text="formatTime(entry.createdAt)"></span>
@@ -1135,6 +1138,18 @@
                             <!-- Mail Detail -->
                             <template x-if="selectedEntry.type === 'MAIL'">
                                 <div class="space-y-4">
+                                    <div class="flex items-center gap-3 flex-wrap">
+                                        <span class="badge text-xs"
+                                              :class="selectedEntry.content?.status === 'failed' ? 'badge-failed' : 'badge-sent'"
+                                              x-text="(selectedEntry.content?.status || 'sent').toUpperCase()"></span>
+                                        <span x-show="selectedEntry.content?.duration !== undefined" class="text-xs text-gray-500 font-mono" x-text="selectedEntry.content?.duration + 'ms'"></span>
+                                        <span x-show="selectedEntry.content?.transport" class="text-xs text-gray-500" x-text="'via ' + selectedEntry.content?.transport"></span>
+                                        <span x-show="selectedEntry.content?.template" class="text-xs text-gray-500 font-mono" x-text="'template: ' + selectedEntry.content?.template"></span>
+                                    </div>
+                                    <div x-show="selectedEntry.content?.error">
+                                        <h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">Error</h4>
+                                        <pre class="text-red-400 text-xs whitespace-pre-wrap" x-text="selectedEntry.content?.error"></pre>
+                                    </div>
                                     <div>
                                         <div class="section-header">
                                             <h4 class="text-xs font-semibold text-gray-500 uppercase">Subject</h4>
@@ -1155,10 +1170,46 @@
                                         </div>
                                         <p class="text-xs text-gray-300 font-mono" x-text="selectedEntry.content?.to"></p>
                                     </div>
-                                    <div x-show="selectedEntry.content?.from">
-                                        <h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">From</h4>
-                                        <p class="text-xs text-gray-300 font-mono" x-text="selectedEntry.content?.from"></p>
+                                    <template x-for="field in [['From', 'from'], ['Cc', 'cc'], ['Bcc', 'bcc'], ['Reply-To', 'replyTo'], ['Message ID', 'messageId']]" :key="field[1]">
+                                        <div x-show="selectedEntry.content?.[field[1]]">
+                                            <h4 class="text-xs font-semibold text-gray-500 uppercase mb-2" x-text="field[0]"></h4>
+                                            <p class="text-xs text-gray-300 font-mono break-all" x-text="selectedEntry.content?.[field[1]]"></p>
+                                        </div>
+                                    </template>
+                                    <div x-show="(selectedEntry.content?.rejected || []).length > 0">
+                                        <h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">Rejected recipients</h4>
+                                        <p class="text-xs text-red-400 font-mono break-all" x-text="(selectedEntry.content?.rejected || []).join(', ')"></p>
                                     </div>
+                                    <div x-show="(selectedEntry.content?.attachments || []).length > 0">
+                                        <h4 class="text-xs font-semibold text-gray-500 uppercase mb-2">Attachments</h4>
+                                        <template x-for="(attachment, index) in (selectedEntry.content?.attachments || [])" :key="index">
+                                            <p class="text-xs font-mono">
+                                                <span class="text-gray-300" x-text="attachment.filename || '(unnamed)'"></span>
+                                                <span class="text-gray-500" x-text="[attachment.contentType, attachment.size !== undefined ? formatBytes(attachment.size) : ''].filter(Boolean).join(' · ')"></span>
+                                            </p>
+                                        </template>
+                                    </div>
+                                    <!-- The mail as its recipient sees it. sandbox="" runs no script, submits no form and cannot navigate the dashboard. -->
+                                    <template x-if="selectedEntry.content?.html">
+                                        <div>
+                                            <div class="section-header">
+                                                <h4 class="text-xs font-semibold text-gray-500 uppercase">HTML</h4>
+                                                <button @click="copyText(selectedEntry.content?.html, 'mail-html')" class="copy-btn" title="Copy HTML">
+                                                    <svg x-show="copiedField !== 'mail-html'" xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><rect x="9" y="9" width="13" height="13" rx="2" stroke-width="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" stroke-width="2"/></svg>
+                                                    <svg x-show="copiedField === 'mail-html'" xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                                                </button>
+                                            </div>
+                                            <p x-show="selectedEntry.content?.htmlTruncated" class="text-xs text-yellow-500 mb-2">Longer than 50 KB: only the beginning was recorded.</p>
+                                            <div class="flex items-center gap-2 mb-2">
+                                                <span class="text-xs text-gray-500" x-text="mailRemoteContent ? 'Remote images and fonts are loaded.' : 'Remote images and fonts are blocked, so opening a mail fires no tracking pixel.'"></span>
+                                                <button @click="mailRemoteContent = !mailRemoteContent" class="text-xs text-violet-400 hover:text-violet-300"
+                                                        x-text="mailRemoteContent ? 'Block them' : 'Load them'"></button>
+                                            </div>
+                                            <iframe sandbox="" title="Mail preview"
+                                                    class="w-full rounded bg-white" style="height: 420px; border: 0;"
+                                                    :srcdoc="mailPreviewDoc(selectedEntry.content?.html)"></iframe>
+                                        </div>
+                                    </template>
                                     <div x-show="selectedEntry.content?.bodyPreview">
                                         <div class="section-header">
                                             <h4 class="text-xs font-semibold text-gray-500 uppercase">Body Preview</h4>
@@ -1360,6 +1411,7 @@
                 expandedGroups: [],
                 copiedField: null,
                 showClearConfirm: false,
+                mailRemoteContent: false,
 
                 // Navigation
                 navItems: [
@@ -1547,6 +1599,7 @@
                 // Select entry
                 async selectEntry(entry) {
                     this.selectedEntry = entry;
+                    this.mailRemoteContent = false;
                     if (entry.batchId) {
                         await this.fetchRelated(entry.uuid);
                     } else {
@@ -1690,6 +1743,22 @@
                         .trim();
                 },
 
+                // The recorded HTML of a mail, for the sandboxed preview. Unless remote content was
+                // asked for, a CSP placed first blocks every request the mail would make (images,
+                // fonts, stylesheets): inline styles and data:/cid: images still render.
+                mailPreviewDoc(html) {
+                    if (!html) return '';
+                    if (this.mailRemoteContent) return html;
+                    return '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data: cid:; style-src \'unsafe-inline\'; font-src data:">' + html;
+                },
+
+                formatBytes(bytes) {
+                    if (typeof bytes !== 'number' || !isFinite(bytes)) return '';
+                    if (bytes < 1024) return bytes + ' B';
+                    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+                    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+                },
+
                 truncateSql(sql) {
                     if (!sql) return '';
                     const clean = sql.replace(/\s+/g, ' ').trim();
@@ -1732,7 +1801,7 @@
                         case 'SCHEDULE': return `${entry.content.class}.${entry.content.method}() [${entry.content.status}]`;
                         case 'CACHE': return `[${entry.content.operation}] ${entry.content.cacheName} ${entry.content.key || ''}`;
                         case 'EVENT': return entry.content.event + (entry.content.source ? ' from ' + entry.content.source : '');
-                        case 'MAIL': return `${entry.content.subject || '(no subject)'} -> ${entry.content.to || ''}`;
+                        case 'MAIL': return `${entry.content.status === 'failed' ? '[FAILED] ' : ''}${entry.content.subject || '(no subject)'} -> ${entry.content.to || ''}`;
                         case 'MODEL': return `[${entry.content.action}] ${entry.content.entity} #${entry.content.entityId}`;
                         default: return entry.uuid;
                     }

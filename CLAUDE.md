@@ -53,7 +53,8 @@ nestjs-telemetry/
 │   │   │   │   ├── schedule.watcher.ts     # @Cron/@Interval/@Timeout wrapper
 │   │   │   │   ├── cache.interceptor.ts    # Cache HIT/MISS tracker
 │   │   │   │   ├── event.watcher.ts        # Event listener recorder
-│   │   │   │   ├── mail.watcher.ts         # Mail send recorder
+│   │   │   │   ├── mail.watcher.ts         # Mail recorder: record() + instrument() of a sendMail()
+│   │   │   │   ├── mail.instrumentation.ts # At init, instruments nodemailer / MailerService providers
 │   │   │   │   └── security.guard.ts       # Access token guard
 │   │   │   ├── pruner/
 │   │   │   │   └── telemetry-pruner.service.ts # Scheduled cleanup + flush
