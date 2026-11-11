@@ -73,11 +73,11 @@ TelemetryModule.forRoot({
 ```
 
 `externalBasePath` matters if your app calls `app.setGlobalPrefix(...)`: `basePath` is only used
-to register the dashboard's route (before the prefix is applied), so the access-token guard and
-the request watcher's self-exclusion keep comparing against the un-prefixed path unless you set
-`externalBasePath` to the real, prefixed path (e.g. `basePath: '/telemetry'`,
-`externalBasePath: '/api/v1/telemetry'`). Without it, the access token is silently never checked
-for a prefixed app.
+to register the dashboard's route (before the prefix is applied), so the request watcher keeps
+comparing against the un-prefixed path, and records the dashboard's own calls as requests, unless
+you set `externalBasePath` to the real, prefixed path (e.g. `basePath: '/telemetry'`,
+`externalBasePath: '/api/v1/telemetry'`). The access token does not depend on it: it is checked on
+every route of the dashboard, wherever and however that route is reached.
 
 ### Async Configuration
 

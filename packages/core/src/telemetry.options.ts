@@ -18,10 +18,12 @@ export interface TelemetryModuleOptions {
    * The path incoming requests actually carry, if different from `basePath` — e.g. when the
    * consuming app applies a global prefix (`app.setGlobalPrefix(...)`) on top of the route this
    * module registers via `RouterModule`. `basePath` is used only for that registration, which
-   * happens before any global prefix is applied; `externalBasePath` is what request-time checks
-   * (the access-token guard, and the request watcher's self-exclusion) compare against instead.
-   * Defaults to `basePath` when omitted, which is correct for the common case of no global prefix
-   * — most existing consumers need no change.
+   * happens before any global prefix is applied; `externalBasePath` is what the request watcher
+   * compares against to leave the dashboard's own traffic out of the recorded requests.
+   * Defaults to `basePath` when omitted, which is correct for the common case of no global prefix.
+   *
+   * It plays no part in the access token: the token is checked on the dashboard's routes wherever
+   * they are mounted.
    */
   externalBasePath?: string;
   maxEntries?: number;

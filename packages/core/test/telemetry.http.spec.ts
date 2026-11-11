@@ -1,3 +1,4 @@
+import { Controller, Get } from '@nestjs/common';
 import request from 'supertest';
 import { TelemetryController } from '../src/controller/telemetry.controller';
 import { TelemetryEntryType } from '../src/model/telemetry-entry-type';
@@ -48,6 +49,20 @@ function callRoute(server: any, base: string, route: string, extra: { token?: st
 
 async function seed(storage: TelemetryStorage) {
   for (const entry of seedEntries()) await storage.store(entry);
+}
+
+/** Host routes whose path starts with the characters of the default basePath. */
+@Controller()
+class LookalikeController {
+  @Get('telemetry-reports')
+  reports() {
+    return { reports: [] };
+  }
+
+  @Get('telemetryx')
+  other() {
+    return { other: true };
+  }
 }
 
 describe('routes', () => {
@@ -264,13 +279,79 @@ describe('access token', () => {
       }
     });
 
-    // The README says so: without externalBasePath the guard compares the un-prefixed basePath
-    // against prefixed requests and silently waves everything through.
-    it('is silently not enforced without externalBasePath (documented in the README)', async () => {
+    // This used to wave every request through: a global guard compared the un-prefixed basePath
+    // with the prefixed path. The guard is bound to the dashboard's controller now.
+    it('is enforced without externalBasePath too', async () => {
       const app = await createTestApp({ globalPrefix: 'api/v1', telemetry: { accessToken: token } });
       await seed(app.storage);
       try {
-        expect(await statuses(app, '/api/v1/telemetry')).toEqual(served);
+        const base = '/api/v1/telemetry';
+        expect(await statuses(app, base)).toEqual(refused);
+        expect(await statuses(app, base, { token: 'nope' })).toEqual(refused);
+        expect(await statuses(app, base, { token })).toEqual(served);
+        expect(await statuses(app, base, { token, viaHeader: true })).toEqual(served);
+        expect((await request(app.server).get('/api/v1/demo/ok')).status).toBe(200);
+      } finally {
+        await app.close();
+      }
+    });
+  });
+
+  describe('on every spelling of the path the router accepts', () => {
+    let app: TestApp;
+
+    beforeEach(async () => {
+      app = await createTestApp({
+        telemetry: { accessToken: token },
+        controllers: [LookalikeController],
+      });
+      await seed(app.storage);
+    });
+
+    afterEach(() => app.close());
+
+    // Express routes without regard to case or to a trailing slash. A guard comparing the path
+    // with `startsWith('/telemetry')` let these through without the token.
+    it.each([
+      '/TELEMETRY',
+      '/Telemetry/api/stats',
+      '/telemetry/API/stats',
+      '/TeLeMeTrY/api/entries?type=LOG',
+      '/telemetry/',
+      '/telemetry/api/stats/',
+    ])('%s needs the token', async (url) => {
+      expect((await request(app.server).get(url)).status).toBe(403);
+      expect((await request(app.server).get(url).set('x-telemetry-token', token)).status).toBe(200);
+    });
+
+    // The other way round: a prefix match refused host routes that merely start with the same
+    // characters.
+    it('leaves the host routes that merely start with the same characters alone', async () => {
+      expect((await request(app.server).get('/telemetry-reports')).status).toBe(200);
+      expect((await request(app.server).get('/telemetryx')).status).toBe(200);
+    });
+  });
+
+  describe('with a basePath written loosely', () => {
+    // `req.path` always starts with a slash, so a comparison with `telemetry` never matched.
+    it('is enforced when basePath has no leading slash', async () => {
+      const app = await createTestApp({ telemetry: { basePath: 'telemetry', accessToken: token } });
+      await seed(app.storage);
+      try {
+        expect(await statuses(app, '/telemetry')).toEqual(refused);
+        expect(await statuses(app, '/telemetry', { token })).toEqual(served);
+      } finally {
+        await app.close();
+      }
+    });
+
+    // The page is served at `/telemetry`, which does not start with `/telemetry/`.
+    it('is enforced when basePath has a trailing slash', async () => {
+      const app = await createTestApp({ telemetry: { basePath: '/telemetry/', accessToken: token } });
+      await seed(app.storage);
+      try {
+        expect(await statuses(app, '/telemetry')).toEqual(refused);
+        expect(await statuses(app, '/telemetry', { token })).toEqual(served);
       } finally {
         await app.close();
       }
@@ -287,6 +368,38 @@ describe('access token', () => {
       try {
         expect(await statuses(app, '/dev/telemetry')).toEqual(refused);
         expect(await statuses(app, '/dev/telemetry', { token, viaHeader: true })).toEqual(served);
+      } finally {
+        await app.close();
+      }
+    });
+
+    // The routes are mounted with the basePath given next to useFactory; the guard used to check
+    // the one useFactory returns, so the two disagreeing left the dashboard open.
+    it('is enforced where the routes are mounted when only useFactory sets basePath', async () => {
+      const app = await createTestApp({
+        async: true,
+        mountPath: null,
+        telemetry: { basePath: '/admin/telemetry', accessToken: token },
+      });
+      await seed(app.storage);
+      try {
+        expect(await statuses(app, '/telemetry')).toEqual(refused);
+        expect(await statuses(app, '/telemetry', { token })).toEqual(served);
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('is enforced where the routes are mounted when only forRootAsync sets basePath', async () => {
+      const app = await createTestApp({
+        async: true,
+        mountPath: '/admin/telemetry',
+        telemetry: { accessToken: token },
+      });
+      await seed(app.storage);
+      try {
+        expect(await statuses(app, '/admin/telemetry')).toEqual(refused);
+        expect(await statuses(app, '/admin/telemetry', { token })).toEqual(served);
       } finally {
         await app.close();
       }

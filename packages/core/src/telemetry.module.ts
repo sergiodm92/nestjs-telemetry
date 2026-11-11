@@ -1,12 +1,10 @@
 import {
-  CanActivate,
   DynamicModule,
   Module,
   NestInterceptor,
   Provider,
 } from '@nestjs/common';
 import {
-  APP_GUARD,
   APP_INTERCEPTOR,
   DiscoveryModule,
   DiscoveryService,
@@ -37,7 +35,6 @@ import { TelemetryCacheInterceptor } from './watchers/cache.interceptor';
 import { TelemetryEventWatcher } from './watchers/event.watcher';
 import { TelemetryMailWatcher } from './watchers/mail.watcher';
 import { TelemetryMailInstrumentation } from './watchers/mail.instrumentation';
-import { TelemetrySecurityGuard } from './watchers/security.guard';
 import { TelemetryPrunerService } from './pruner/telemetry-pruner.service';
 
 // `externalBasePath` is intentionally excluded from the `Required<...>` part: it has no
@@ -50,7 +47,6 @@ type ResolvedOptions = Required<Omit<TelemetryModuleOptions, 'externalBasePath'>
 const PASS_THROUGH_INTERCEPTOR: NestInterceptor = {
   intercept: (_context, next) => next.handle(),
 };
-const PASS_THROUGH_GUARD: CanActivate = { canActivate: () => true };
 
 /** Providers shared by forRoot and forRootAsync so the two cannot drift. */
 const SHARED_EXPORTS = [
@@ -177,17 +173,9 @@ function buildWatcherProviders(): Provider[] {
           : PASS_THROUGH_INTERCEPTOR,
       inject: [TELEMETRY_OPTIONS, TELEMETRY_STORAGE],
     },
-    {
-      provide: APP_GUARD,
-      useFactory: (opts: ResolvedOptions): CanActivate =>
-        opts.accessToken
-          ? new TelemetrySecurityGuard(
-              opts.externalBasePath ?? opts.basePath,
-              opts.accessToken,
-            )
-          : PASS_THROUGH_GUARD,
-      inject: [TELEMETRY_OPTIONS],
-    },
+    // No global guard: the access token is checked by TelemetrySecurityGuard, bound to
+    // TelemetryController with @UseGuards, so it covers every route of the dashboard and nothing
+    // else, whatever path the request was routed by.
   ];
 }
 

@@ -1,10 +1,22 @@
-import { Controller, Get, Post, Delete, Query, Param, Res, Injectable, Inject } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Query,
+  Param,
+  Res,
+  Injectable,
+  Inject,
+  UseGuards,
+} from '@nestjs/common';
 import { Response } from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
 import { TelemetryStorage } from '../storage/telemetry-storage.interface';
 import { TelemetryEntryType } from '../model/telemetry-entry-type';
 import { TELEMETRY_STORAGE } from '../telemetry.constants';
+import { TelemetrySecurityGuard } from '../watchers/security.guard';
 
 interface ApiResponse<T = any> {
   success: boolean;
@@ -24,9 +36,13 @@ function error(message: string): ApiResponse {
  * The module mounts this controller at `basePath` (via RouterModule). Only the dashboard page is
  * served there; every JSON route lives under `{basePath}/api`, which is where the dashboard and
  * the README expect them. The dashboard/controller contract test pins this.
+ *
+ * The access token is checked here, on this controller, rather than by a global guard comparing
+ * paths: whatever path a request took to get here, it is a dashboard request.
  */
 @Injectable()
 @Controller()
+@UseGuards(TelemetrySecurityGuard)
 export class TelemetryController {
   constructor(@Inject(TELEMETRY_STORAGE) private readonly storage: TelemetryStorage) {}
 

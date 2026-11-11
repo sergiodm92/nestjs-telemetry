@@ -14,6 +14,7 @@ import {
   ParseIntPipe,
   Post,
   Res,
+  Type,
   UseGuards,
 } from '@nestjs/common';
 import { APP_FILTER } from '@nestjs/core';
@@ -212,10 +213,17 @@ export interface TestAppOptions {
   telemetry?: TelemetryModuleOptions;
   /** Register through forRootAsync, the way a host that reads its config does. */
   async?: boolean;
+  /**
+   * With `async`: the `basePath` handed to forRootAsync next to `useFactory`, which is where the
+   * routes are mounted, when it is not the one `useFactory` returns. `null` leaves it out.
+   */
+  mountPath?: string | null;
   /** app.setGlobalPrefix(...) */
   globalPrefix?: string;
   /** Register HostExceptionFilter as a global filter. */
   hostFilter?: boolean;
+  /** More host controllers, next to DemoController. */
+  controllers?: Type[];
 }
 
 export interface TestApp {
@@ -238,12 +246,15 @@ export async function createTestApp(options: TestAppOptions = {}): Promise<TestA
     imports: [
       options.async
         ? TelemetryModule.forRootAsync({
-            basePath: telemetry.basePath,
+            basePath:
+              options.mountPath === undefined
+                ? telemetry.basePath
+                : (options.mountPath ?? undefined),
             useFactory: () => telemetry,
           })
         : TelemetryModule.forRoot(telemetry),
     ],
-    controllers: [DemoController],
+    controllers: [DemoController, ...(options.controllers ?? [])],
     providers: options.hostFilter ? [{ provide: APP_FILTER, useClass: HostExceptionFilter }] : [],
   }).compile();
 

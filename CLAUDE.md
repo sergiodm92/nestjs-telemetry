@@ -55,7 +55,7 @@ nestjs-telemetry/
 │   │   │   │   ├── event.watcher.ts        # Event listener recorder
 │   │   │   │   ├── mail.watcher.ts         # Mail recorder: record() + instrument() of a sendMail()
 │   │   │   │   ├── mail.instrumentation.ts # At init, instruments nodemailer / MailerService providers
-│   │   │   │   └── security.guard.ts       # Access token guard
+│   │   │   │   └── security.guard.ts       # Access token check, bound to TelemetryController
 │   │   │   ├── pruner/
 │   │   │   │   └── telemetry-pruner.service.ts # Scheduled cleanup + flush
 │   │   │   └── dashboard/
