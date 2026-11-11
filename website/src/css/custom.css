@@ -1,0 +1,54 @@
+/**
+ * Any CSS included here will be global. The classic template
+ * bundles Infima by default. Infima is a CSS framework designed to
+ * work well for content-centric websites.
+ *
+ * The palette follows the dashboard itself (violet accents on a dark surface).
+ */
+
+:root {
+  --ifm-color-primary: #7c3aed;
+  --ifm-color-primary-dark: #6d28d9;
+  --ifm-color-primary-darker: #6526ca;
+  --ifm-color-primary-darkest: #5b21b6;
+  --ifm-color-primary-light: #8b5cf6;
+  --ifm-color-primary-lighter: #9061f9;
+  --ifm-color-primary-lightest: #a78bfa;
+  --ifm-code-font-size: 92%;
+  --docusaurus-highlighted-code-line-bg: rgba(124, 58, 237, 0.12);
+  --nt-hero-from: #f5f3ff;
+  --nt-hero-to: #ffffff;
+  --nt-card-bg: #ffffff;
+  --nt-card-border: #e9e5f5;
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #a78bfa;
+  --ifm-color-primary-dark: #9061f9;
+  --ifm-color-primary-darker: #8b5cf6;
+  --ifm-color-primary-darkest: #7c3aed;
+  --ifm-color-primary-light: #b79ffb;
+  --ifm-color-primary-lighter: #c4b5fd;
+  --ifm-color-primary-lightest: #ddd6fe;
+  --ifm-background-color: #0b0b12;
+  --ifm-background-surface-color: #11111b;
+  --docusaurus-highlighted-code-line-bg: rgba(167, 139, 250, 0.16);
+  --nt-hero-from: #17112b;
+  --nt-hero-to: #0b0b12;
+  --nt-card-bg: #13131f;
+  --nt-card-border: #262338;
+}
+
+.navbar__logo {
+  height: 1.75rem;
+}
+
+/* Tables in reference pages hold long identifiers: let them breathe and wrap. */
+.markdown table {
+  display: table;
+  width: 100%;
+}
+
+.markdown table code {
+  white-space: nowrap;
+}

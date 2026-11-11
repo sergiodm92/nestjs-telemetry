@@ -233,6 +233,18 @@ All entries within a single HTTP request share a `batchId` via `AsyncLocalStorag
 - **Alpine.js 3 + Tailwind CSS** for the dashboard UI
 - **npm workspaces** monorepo
 
+## Documentation
+
+The full documentation (configuration, every watcher, the dashboard, the REST API, masking rules,
+production checklist, troubleshooting) is at **https://sergiodm92.github.io/nestjs-telemetry/**.
+
+It is a Docusaurus site in [`website/`](website/), published by the `Docs` workflow on every push
+to `main` that changes it. To work on it locally:
+
+```bash
+cd website && npm install && npm start
+```
+
 ## Development
 
 ```bash
